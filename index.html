@@ -1,39 +1,45 @@
 <!DOCTYPE html>
 <html lang="en">
+<head>
+    <!-- 
+        Importa a biblioteca Phaser 3 direto de um CDN (servidor externo).
+        O Phaser é o "motor" do jogo, ele cuida de renderizar imagens na tela,
+        física, animações, input do teclado, etc.
+        Precisa vir ANTES dos seus scripts para estar disponível quando eles rodarem.
+    -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    
+    
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The last knight</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
 
-    <head>
+    <!--
+        A ORDEM DOS SCRIPTS IMPORTA MUITO!
         
-        <!-- aqui estou importando a biblioteca -->
-        <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
-
-        <!--Define o conjunto de caracteres usado -->
-        <meta charset="UTF-8">
-
-        <!-- aqui nessa parte, serve para controlar como a página se adapta ao tamanho da tela -->
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        1. knight.js  → precisa ser carregado PRIMEIRO porque a classe Knight
+                         é usada dentro de background.js. Se background.js
+                         carregar antes, ele tentaria usar Knight antes de existir.
         
-        <!-- Define o título da aba do navegador -->
-        <title>The last knight</title>
+        2. background.js → usa a classe Knight, então Knight já deve existir.
         
-        <style>
-            body {
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                height: 100vh; 
-                margin: 0;
-            }
-        </style>
-
-    </head>
-
-    <body>
-        <!-- Carrega o código do jogo -->
-          <script src="background.js"></script>
-          <script src="knight.js"></script>
-          <script src="main.js"></script>
-    </body>
-
+        3. main.js → inicia o jogo usando as classes Background (e Knight).
+                     Precisa vir por último pois depende de tudo acima.
+    -->
+        
+    <script src="knight.js"></script>
+    <script src="background.js"></script>
+    <script src="main.js"></script>
+</body>
 </html>
-
-
