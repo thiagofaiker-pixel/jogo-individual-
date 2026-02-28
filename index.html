@@ -17,8 +17,13 @@
     </style>
 </head>
 <body>
-    <!-- Ordem importa: Knight precisa existir antes de Background -->
+    <!--
+        Ordem de carregamento dos scripts — importante!
+        Knight deve vir antes de Background (que o usa).
+        Menu e Background devem vir antes de main.js (que os referencia).
+    -->
     <script src="knight.js"></script>
+    <script src="menu.js"></script>
     <script src="background.js"></script>
     <script src="main.js"></script>
 </body>
