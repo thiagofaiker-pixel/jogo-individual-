@@ -1,20 +1,32 @@
-/* criando uma classe chamada Background que herda tudo que uma scene Phase já tem
-Basicamente é uma HERANÇA que estudamos em aula.Background recebe automaticamente todos os métodos
-e propriedades de Phaser.Scene, como this.add, this.load, this.physics, etc.
-É como se Background fosse uma Scene com funcionalidades extras.
+// ============================================================
+//  background.js
+//  Cena principal. Gerencia: cenário, plataformas flutuantes,
+//  moedas com partículas, pássaros, score e UI completa.
+// ============================================================
 
-*/
-
-class Background extends Phaser.Scene {  
-    
-    // declarando propriedade no construtor
+class Background extends Phaser.Scene {
     constructor() {
         super('Background');
-        this.layers = []; // Array que vai guardar os sprites de cada camada do parallax
-        this.knight = null; // Referência ao objeto Knight  
+
+        this.knight         = null;   // instância do cavaleiro
+        this.birds          = null;   // grupo de pássaros em voo
+        this.platforms      = null;   // grupo de plataformas estáticas flutuantes
+        this.coins          = null;   // grupo de moedas coletáveis
+        this.birdSpawnTimer = null;   // timer de spawn de pássaros
+        this.coinSpawnTimer = null;   // timer de respawn de moedas
+        this.scoreTick      = null;   // timer que incrementa o score com o tempo
+        this.isGameOver     = false;
+        this.gameStarted    = false;
+        this.score          = 0;
+        this.totalCoins     = 0;      // moedas coletadas nessa run
+        this.scoreText      = null;
+        this.coinText       = null;
+        this.startScreenGroup = null;
     }
 
-    // carrega 12 imagens para efeito parallax
+    // ----------------------------------------------------------
+    //  PRELOAD — carrega todos os assets antes do primeiro frame
+    // ----------------------------------------------------------
     preload() {
         this.load.image('layer0',  'assets/background/Layer_0000_9.png');
         this.load.image('layer1',  'assets/background/Layer_0001_8.png');
@@ -29,34 +41,689 @@ class Background extends Phaser.Scene {
         this.load.image('layer10', 'assets/background/Layer_0010_1.png');
         this.load.image('layer11', 'assets/background/Layer_0011_0.png');
 
-        // Cria UMA instância do Knight e chama o preload dele
+        // Spritesheets gerados em canvas — sem arquivo externo necessário
+        this._createBirdSpritesheet();
+        this._createCoinSpritesheet();
+        this._createPlatformTexture();
+
         this.knight = new Knight(this);
         this.knight.preload();
     }
 
-    create() {
-        for (let i = 11; i >= 0; i--) {
-            let bg = this.add.tileSprite(464, 396, 928, 793, 'layer' + i);
-            this.layers[i] = bg;
-        }
+    // ----------------------------------------------------------
+    //  _createBirdSpritesheet — 4 frames de voo desenhados
+    //  em canvas e registrados como textura no Phaser
+    // ----------------------------------------------------------
+    _createBirdSpritesheet() {
+        const fw = 64, fh = 48, frames = 4;
+        const canvas = document.createElement('canvas');
+        canvas.width = fw * frames; canvas.height = fh;
+        const ctx = canvas.getContext('2d');
+        const wingAngles = [0.3, 0.1, -0.25, 0.1];
 
-        // Usa a mesma instância criada no preload
-        this.knight.create();
+        for (let f = 0; f < frames; f++) {
+            ctx.save();
+            ctx.translate(fw * f + fw / 2, fh / 2);
+
+            // Corpo oval
+            ctx.fillStyle = '#1a1a2e';
+            ctx.beginPath(); ctx.ellipse(0, 2, 14, 7, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(14, -2, 6, 0, Math.PI * 2); ctx.fill();
+
+            // Bico
+            ctx.fillStyle = '#e8c547';
+            ctx.beginPath(); ctx.moveTo(20,-2); ctx.lineTo(27,-1); ctx.lineTo(20,1); ctx.fill();
+
+            // Olho com brilho
+            ctx.fillStyle = '#ff4444';
+            ctx.beginPath(); ctx.arc(16,-3,2,0,Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.beginPath(); ctx.arc(16.5,-3.5,0.7,0,Math.PI*2); ctx.fill();
+
+            // Asa animada com rotação por frame
+            ctx.save(); ctx.rotate(wingAngles[f]);
+            ctx.fillStyle = '#2d2d5e';
+            ctx.beginPath(); ctx.moveTo(-2,0); ctx.bezierCurveTo(-10,-20,10,-22,12,-2);
+            ctx.bezierCurveTo(6,-5,-2,-4,-2,0); ctx.fill();
+            ctx.strokeStyle = '#4a4a8a'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(0,-2); ctx.bezierCurveTo(-4,-14,6,-16,10,-4); ctx.stroke();
+            ctx.restore();
+
+            // Cauda
+            ctx.fillStyle = '#1a1a2e';
+            ctx.beginPath(); ctx.moveTo(-14,2); ctx.lineTo(-22,-3); ctx.lineTo(-20,2);
+            ctx.lineTo(-22,6); ctx.lineTo(-14,4); ctx.fill();
+            ctx.restore();
+        }
+        this.textures.addSpriteSheet('bird', canvas, { frameWidth: fw, frameHeight: fh });
     }
 
+    // ----------------------------------------------------------
+    //  _createCoinSpritesheet — 8 frames de rotação de moeda
+    //  em canvas (efeito de girando no eixo Y)
+    // ----------------------------------------------------------
+    _createCoinSpritesheet() {
+        const fw = 32, fh = 32, frames = 8;
+        const canvas = document.createElement('canvas');
+        canvas.width = fw * frames; canvas.height = fh;
+        const ctx = canvas.getContext('2d');
 
-     /*
-        update() é chamado pelo Phaser ~60 vezes por segundo (60 FPS).
-        É o "coração" do jogo - o loop principal.
-        Aqui você verifica inputs, move personagens, checa colisões, etc.
-    */
-    update() {
-        for (let i = 0; i < this.layers.length; i++) {   // formula da velocidade do parallax
-            let speed = (11 - i) * 0.05;
-            this.layers[i].tilePositionX += speed;
+        for (let f = 0; f < frames; f++) {
+            // A largura varia como cos — simula rotação em perspectiva
+            const scaleX = Math.abs(Math.cos((f / frames) * Math.PI * 2));
+            const w = Math.max(3, 12 * scaleX);
+            ctx.save();
+            ctx.translate(fw * f + fw / 2, fh / 2);
+
+            // Gradiente dourado
+            const grad = ctx.createLinearGradient(-w, -12, w, 12);
+            grad.addColorStop(0,   '#ffd700');
+            grad.addColorStop(0.4, '#ffec6e');
+            grad.addColorStop(1,   '#b8860b');
+            ctx.fillStyle = grad;
+            ctx.beginPath(); ctx.ellipse(0, 0, w, 12, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = '#c8a000'; ctx.lineWidth = 1.5; ctx.stroke();
+
+            // Símbolo "$" visível somente quando a moeda está de frente
+            if (scaleX > 0.5) {
+                ctx.fillStyle = '#8B6914';
+                ctx.font = `bold ${Math.round(10 * scaleX)}px Arial`;
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText('$', 0, 1);
+            }
+            ctx.restore();
+        }
+        this.textures.addSpriteSheet('coin', canvas, { frameWidth: fw, frameHeight: fh });
+    }
+
+    // ----------------------------------------------------------
+    //  _createPlatformTexture — desenha uma textura de pedra
+    //  para as plataformas flutuantes e registra no Phaser.
+    //  A textura é tileable: pode ser usada em plataformas
+    //  de qualquer largura.
+    // ----------------------------------------------------------
+    _createPlatformTexture() {
+        const tw = 32, th = 20; // tamanho de um "tile" da plataforma
+        const canvas = document.createElement('canvas');
+        canvas.width = tw; canvas.height = th;
+        const ctx = canvas.getContext('2d');
+
+        // Fundo base de pedra
+        ctx.fillStyle = '#6b7280';
+        ctx.fillRect(0, 0, tw, th);
+
+        // Gradiente para dar sensação de volume (mais claro no topo)
+        const grad = ctx.createLinearGradient(0, 0, 0, th);
+        grad.addColorStop(0,   'rgba(255,255,255,0.25)');
+        grad.addColorStop(0.4, 'rgba(255,255,255,0.05)');
+        grad.addColorStop(1,   'rgba(0,0,0,0.3)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, tw, th);
+
+        // Linha de destaque no topo (bordas de pedra aparada)
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.fillRect(0, 0, tw, 2);
+
+        // Linha escura na base (sombra embaixo)
+        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+        ctx.fillRect(0, th - 2, tw, 2);
+
+        // Veios de pedra (linhas sutis para dar textura)
+        ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(8, 3); ctx.lineTo(6, th - 3); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(20, 2); ctx.lineTo(22, th - 3); ctx.stroke();
+
+        this.textures.addImage('platTile', canvas);
+    }
+
+    // ----------------------------------------------------------
+    //  CREATE — monta toda a cena: layers, plataformas,
+    //  chão, cavaleiro, colisões, animações e tela de início
+    // ----------------------------------------------------------
+    create() {
+        const W = 928, H = 793;
+        this.physics.world.setBounds(0, 0, W, H);
+        this.isGameOver  = false;
+        this.gameStarted = false;
+        this.score       = 0;
+        this.totalCoins  = 0;
+
+        // Empilha todas as camadas do background (11 = mais ao fundo)
+        for (let i = 11; i >= 0; i--) {
+            this.add.image(W / 2, H / 2, 'layer' + i);
         }
 
-        // Chama o create() do Knight para criar o sprite e as animações
+        // Cria o cavaleiro (em idle, esperando o jogador iniciar)
+        this.knight.create();
+
+        // ======================================================
+        //  PLATAFORMAS FLUTUANTES — estilo Mario, espalhadas em
+        //  diferentes alturas para criar rotas de navegação.
+        //  O jogador sobe nelas apenas pulando.
+        // ======================================================
+        this.platforms = this.physics.add.staticGroup();
+
+        // Definição de cada plataforma: [cx, y, largura, label de dica]
+        // As posições formam um layout pensado para haver sempre um
+        // caminho viável de pulo entre plataformas adjacentes
+        const platDefs = [
+            // Plataforma BEM BAIXA — acessível quase sem pulo, perto do chão
+            { cx: 464,  y: 650, w: 200 },
+
+            // Linha baixa — fáceis de alcançar com 1 pulo
+            { cx: 160,  y: 560, w: 140 },
+            { cx: 680,  y: 560, w: 140 },
+            { cx: 860,  y: 530, w: 100 },
+
+            // Linha do meio — exige 1-2 pulos encadeados
+            { cx: 280,  y: 420, w: 130 },
+            { cx: 530,  y: 400, w: 150 },
+            { cx: 790,  y: 390, w: 120 },
+
+            // Linha alta — exige pulos bem cronometrados
+            { cx: 130,  y: 290, w: 120 },
+            { cx: 390,  y: 270, w: 130 },
+            { cx: 650,  y: 255, w: 120 },
+            { cx: 870,  y: 265, w: 100 },
+        ];
+
+        // Constrói cada plataforma com visual e corpo físico
+        platDefs.forEach(def => this._buildPlatform(def.cx, def.y, def.w));
+
+        // Chão cobrindo toda a largura da tela
+        const chao = this.physics.add.staticImage(W / 2, 730, null);
+        chao.setVisible(false);
+        chao.body.setSize(W, 10);
+
+        // O cavaleiro colide com o chão normalmente
+        this.physics.add.collider(this.knight.cavaleira, chao);
+
+        // Colisão ONE-WAY com as plataformas:
+        // O callback só retorna true (ativa a colisão) quando o cavaleiro
+        // está descendo (velocity.y >= 0) E o topo da hitbox do cavaleiro
+        // já passou o topo da plataforma — assim ele atravessa por baixo
+        // pulando mas pousa normalmente ao cair de cima, igual ao Mario.
+        this.physics.add.collider(
+            this.knight.cavaleira,
+            this.platforms,
+            null,
+            (cavaleira, plat) => {
+                // Ativa colisão só se o cavaleiro estiver descendo
+                // e o pé dele estiver acima do topo da plataforma
+                return cavaleira.body.velocity.y >= 0 &&
+                       cavaleira.body.bottom <= plat.body.top + 8;
+            },
+            this
+        );
+
+        // ======================================================
+        //  ANIMAÇÕES DE PÁSSARO E MOEDA
+        // ======================================================
+        if (!this.anims.exists('anim_bird_fly')) {
+            // Aqui acontece o loop infinito do bater de asas do pássaro
+            this.anims.create({
+                key: 'anim_bird_fly',
+                frames: this.anims.generateFrameNumbers('bird', { start: 0, end: 3 }),
+                frameRate: 10, repeat: -1
+            });
+        }
+        if (!this.anims.exists('anim_coin_spin')) {
+            // Aqui acontece o loop infinito de rotação das moedas
+            this.anims.create({
+                key: 'anim_coin_spin',
+                frames: this.anims.generateFrameNumbers('coin', { start: 0, end: 7 }),
+                frameRate: 12, repeat: -1
+            });
+        }
+
+        // ======================================================
+        //  GRUPOS E OVERLAPS
+        // ======================================================
+        this.birds = this.physics.add.group();
+        this.coins = this.physics.add.group();
+
+        // Colisão pássaro → game over
+        this.physics.add.overlap(
+            this.knight.cavaleira, this.birds,
+            this._onBirdHit, null, this
+        );
+        // Colisão moeda → coleta + efeito visual
+        this.physics.add.overlap(
+            this.knight.cavaleira, this.coins,
+            this._onCoinCollect, null, this
+        );
+
+        // ======================================================
+        //  TIMERS — iniciam pausados, são liberados em _startGame
+        // ======================================================
+
+        // Aqui acontece o loop infinito de spawn dos pássaros
+        this.birdSpawnTimer = this.time.addEvent({
+            delay: 1200, callback: this._spawnBird,
+            callbackScope: this, loop: true, paused: true
+        });
+
+        // Aqui acontece o loop de respawn das moedas quando somem
+        this.coinSpawnTimer = this.time.addEvent({
+            delay: 3000, callback: this._spawnCoin,
+            callbackScope: this, loop: true, paused: true
+        });
+
+        // Aqui acontece o loop que incrementa o score a cada 100ms de sobrevivência
+        this.scoreTick = this.time.addEvent({
+            delay: 100,
+            callback: () => {
+                if (!this.isGameOver && this.gameStarted) {
+                    this.score++;
+                    this.scoreText.setText('Score: ' + this.score);
+                    // Aperta o intervalo de spawn conforme o score sobe (mínimo 400ms)
+                    this.birdSpawnTimer.delay = Math.max(400, 1200 - this.score * 3);
+                }
+            },
+            loop: true, paused: true
+        });
+
+        // ======================================================
+        //  HUD — oculto até o jogo começar
+        // ======================================================
+        this.scoreText = this.add.text(16, 16, 'Score: 0', {
+            fontSize: '22px', fill: '#ffffff',
+            stroke: '#000', strokeThickness: 4, fontFamily: 'Arial'
+        }).setDepth(10).setVisible(false);
+
+        this.coinText = this.add.text(16, 46, '🪙 0', {
+            fontSize: '22px', fill: '#ffd700',
+            stroke: '#000', strokeThickness: 4, fontFamily: 'Arial'
+        }).setDepth(10).setVisible(false);
+
+        this.cameras.main.setBounds(0, 0, W, H);
+        this._showStartScreen(W, H);
+    }
+
+    // ----------------------------------------------------------
+    //  _buildPlatform — constrói uma plataforma flutuante:
+    //  visual de pedra tileada + corpo físico invisível.
+    //
+    //  cx    — centro X
+    //  y     — Y do topo (onde o cavaleiro fica em pé)
+    //  width — largura total em pixels
+    // ----------------------------------------------------------
+    _buildPlatform(cx, y, width) {
+        const h    = 20;  // espessura visual
+        const half = width / 2;
+        const g    = this.add.graphics().setDepth(5);
+
+        // Sombra projetada abaixo da plataforma (cria ilusão de flutuação)
+        g.fillStyle(0x000000, 0.3);
+        g.fillRect(cx - half + 6, y + h + 2, width - 4, 6);
+
+        // Aqui acontece o loop que empilha os tiles de pedra lado a lado
+        // para preencher toda a largura da plataforma
+        const tw = 32; // largura de cada tile de pedra
+        for (let tx = cx - half; tx < cx + half; tx += tw) {
+            const tileW = Math.min(tw, cx + half - tx); // último tile pode ser menor
+            g.fillStyle(0x6b7280, 1);
+            g.fillRect(tx, y, tileW, h);
+
+            // Gradiente manual simulado por faixas de cor (canvas não disponível aqui)
+            g.fillStyle(0xffffff, 0.2);
+            g.fillRect(tx, y, tileW, 3);           // borda superior clara
+            g.fillStyle(0x000000, 0.25);
+            g.fillRect(tx, y + h - 3, tileW, 3);  // borda inferior escura
+
+            // Separadores verticais entre tiles (juntas de pedra)
+            if (tx > cx - half) {
+                g.lineStyle(1, 0x000000, 0.2);
+                g.lineBetween(tx, y + 3, tx, y + h - 3);
+            }
+        }
+
+        // Indicador sutil de "plataforma" — pequenas setas acima
+        g.fillStyle(0xffffff, 0.15);
+        g.fillTriangle(cx, y - 8, cx - 6, y - 1, cx + 6, y - 1);
+
+        // Corpo físico invisível que de fato colide com o cavaleiro.
+        // checkCollision.down = false permite o cavaleiro pular ATRAVÉS
+        // da plataforma por baixo (exatamente como Mario)
+        const plat = this.platforms.create(cx, y, null);
+        plat.setVisible(false);
+        plat.refreshBody();
+        plat.body.setSize(width, h);
+        plat.body.setOffset(-(width / 2), 0);
+        // A lógica one-way (atravessar por baixo) é gerenciada pelo
+        // callback do collider em create() — não precisa de flags aqui
+    }
+
+    // ----------------------------------------------------------
+    //  _showStartScreen — tela de boas-vindas com título,
+    //  controles do jogo e botão piscante para iniciar
+    // ----------------------------------------------------------
+    _showStartScreen(W, H) {
+        this.startScreenGroup = this.add.group();
+
+        // Fundo semitransparente do painel
+        const overlay = this.add.rectangle(W/2, H/2, 580, 480, 0x000000, 0.78)
+            .setDepth(30).setStrokeStyle(2, 0x8888ff);
+        this.startScreenGroup.add(overlay);
+
+        // Título do jogo
+        this.startScreenGroup.add(
+            this.add.text(W/2, H/2 - 195, 'THE LAST KNIGHT', {
+                fontSize: '46px', fill: '#f0c040', stroke: '#000', strokeThickness: 6,
+                fontFamily: 'Arial Black, Arial', fontStyle: 'bold'
+            }).setOrigin(0.5).setDepth(31)
+        );
+
+        // Subtítulo / tagline
+        this.startScreenGroup.add(
+            this.add.text(W/2, H/2 - 140, 'Desvie dos pássaros · Colete moedas · Sobreviva!', {
+                fontSize: '18px', fill: '#cccccc', stroke: '#000', strokeThickness: 3,
+                fontFamily: 'Arial'
+            }).setOrigin(0.5).setDepth(31)
+        );
+
+        // Linha divisória
+        this.startScreenGroup.add(this.add.rectangle(W/2, H/2 - 108, 500, 2, 0x555588).setDepth(31));
+
+        // Cabeçalho de controles
+        this.startScreenGroup.add(
+            this.add.text(W/2, H/2 - 82, '— CONTROLES —', {
+                fontSize: '18px', fill: '#8888ff', stroke: '#000', strokeThickness: 3,
+                fontFamily: 'Arial', fontStyle: 'bold'
+            }).setOrigin(0.5).setDepth(31)
+        );
+
+        // Linhas de cada controle do jogo
+        const controles = [
+            { tecla: '← A  /  → D',    acao: 'Mover para os lados'    },
+            { tecla: '↑ W  /  ESPAÇO', acao: 'Pular (sobe plataformas)' },
+            { tecla: '↓ S',             acao: 'Agachar'                 },
+        ];
+
+        // Aqui acontece o loop que renderiza cada linha de controle
+        controles.forEach(({ tecla, acao }, i) => {
+            const yPos = H/2 - 28 + i * 56;
+
+            // Caixa de fundo da tecla
+            this.startScreenGroup.add(
+                this.add.rectangle(W/2 - 105, yPos, 230, 38, 0x222255, 0.95)
+                    .setDepth(31).setStrokeStyle(1, 0x5555aa)
+            );
+            // Texto da tecla em fonte mono (parece um teclado real)
+            this.startScreenGroup.add(
+                this.add.text(W/2 - 105, yPos, tecla, {
+                    fontSize: '14px', fill: '#ffff88',
+                    fontFamily: 'Courier New, monospace', fontStyle: 'bold'
+                }).setOrigin(0.5).setDepth(32)
+            );
+            // Seta separadora
+            this.startScreenGroup.add(
+                this.add.text(W/2 + 22, yPos, '→', {
+                    fontSize: '16px', fill: '#888', fontFamily: 'Arial'
+                }).setOrigin(0.5).setDepth(32)
+            );
+            // Descrição da ação
+            this.startScreenGroup.add(
+                this.add.text(W/2 + 160, yPos, acao, {
+                    fontSize: '15px', fill: '#dddddd', fontFamily: 'Arial'
+                }).setOrigin(0.5).setDepth(32)
+            );
+        });
+
+        // Linha divisória inferior
+        this.startScreenGroup.add(this.add.rectangle(W/2, H/2 + 148, 500, 2, 0x555588).setDepth(31));
+
+        // Dica rápida de moedas
+        this.startScreenGroup.add(
+            this.add.text(W/2, H/2 + 170, '🪙 Moedas em plataformas valem +10 pontos bônus!', {
+                fontSize: '15px', fill: '#ffd700', stroke: '#000', strokeThickness: 2,
+                fontFamily: 'Arial'
+            }).setOrigin(0.5).setDepth(31)
+        );
+
+        // Botão piscante de início
+        const botao = this.add.text(W/2, H/2 + 210, '▶   PRESSIONE ENTER ou ESPAÇO', {
+            fontSize: '22px', fill: '#ffffff', stroke: '#000', strokeThickness: 4,
+            fontFamily: 'Arial', fontStyle: 'bold'
+        }).setOrigin(0.5).setDepth(31);
+        this.startScreenGroup.add(botao);
+
+        // Efeito de piscar que chama a atenção do jogador para o botão de início
+        this.tweens.add({
+            targets: botao, alpha: 0.1, duration: 600,
+            yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+        });
+
+        // Escuta ENTER ou ESPAÇO para iniciar o jogo
+        const iniciar = (e) => {
+            if (e.keyCode === Phaser.Input.Keyboard.KeyCodes.SPACE ||
+                e.keyCode === Phaser.Input.Keyboard.KeyCodes.ENTER) {
+                this._startGame();
+                this.input.keyboard.off('keydown', iniciar);
+            }
+        };
+        this.input.keyboard.on('keydown', iniciar);
+    }
+
+    // ----------------------------------------------------------
+    //  _startGame — destrói a tela de início e despausa todos
+    //  os timers que estavam esperando o jogador iniciar
+    // ----------------------------------------------------------
+    _startGame() {
+        this.startScreenGroup.getChildren().forEach(o => o.destroy());
+        this.startScreenGroup.clear(true, true);
+
+        this.gameStarted = true;
+        this.scoreText.setVisible(true);
+        this.coinText.setVisible(true);
+
+        // Despausa os três loops principais do jogo ao mesmo tempo
+        this.birdSpawnTimer.paused = false;
+        this.coinSpawnTimer.paused = false;
+        this.scoreTick.paused      = false;
+
+        // Popula o mapa com moedas imediatamente ao iniciar
+        for (let i = 0; i < 4; i++) this._spawnCoin();
+    }
+
+    // ----------------------------------------------------------
+    //  _spawnBird — cria um pássaro em uma das três faixas de
+    //  altura, forçando o jogador a usar diferentes esquivas
+    // ----------------------------------------------------------
+    _spawnBird() {
+        if (this.isGameOver || !this.gameStarted) return;
+
+        // Faixas de altura para spawn de pássaros:
+        // ALTA força agachar, BAIXA força pular, MÉDIA força lateral
+        const faixas = [
+            { min: 180, max: 330 },  // ALTA  — agache ou pule alto para desviar
+            { min: 360, max: 490 },  // MÉDIA — desvio lateral ou pulo médio
+            { min: 560, max: 680 },  // BAIXA — pule para desviar
+        ];
+
+        const faixa = Phaser.Utils.Array.GetRandom(faixas);
+        const yPos  = Phaser.Math.Between(faixa.min, faixa.max);
+        // Velocidade cresce gradualmente com o score
+        const speed = Phaser.Math.Between(280, 420) + Math.min(this.score * 0.5, 200);
+
+        const bird = this.birds.create(980, yPos, 'bird');
+        bird.setScale(1.6);
+        bird.setFlipX(true);             // espelha para voar da direita para a esquerda
+        bird.body.allowGravity = false;  // voo em linha reta horizontal
+        bird.setVelocityX(-speed);
+        bird.body.setSize(40, 28);
+        bird.body.setOffset(12, 10);
+        bird.play('anim_bird_fly');
+    }
+
+    // ----------------------------------------------------------
+    //  _spawnCoin — cria uma moeda em posição aleatória.
+    //  Moedas aparecem tanto no chão quanto em cima das
+    //  plataformas, incentivando o jogador a explorar as alturas.
+    // ----------------------------------------------------------
+    _spawnCoin() {
+        if (this.isGameOver || !this.gameStarted) return;
+
+        // Pontos de spawn possíveis — distribuídos por toda a tela.
+        // Os pontos em plataformas exigem que o jogador pule para alcançá-los.
+        const spawnPoints = [
+            // Nível do chão — fácil de alcançar
+            { x: Phaser.Math.Between(50,  200), y: 685 },
+            { x: Phaser.Math.Between(300, 500), y: 685 },
+            { x: Phaser.Math.Between(600, 870), y: 685 },
+
+            // Plataformas baixas — 1 pulo
+            { x: Phaser.Math.Between(100, 220), y: 530 },
+            { x: Phaser.Math.Between(360, 480), y: 510 },
+            { x: Phaser.Math.Between(620, 740), y: 530 },
+            { x: Phaser.Math.Between(820, 900), y: 500 },
+
+            // Plataformas médias — 2 pulos encadeados
+            { x: Phaser.Math.Between(220, 340), y: 390 },
+            { x: Phaser.Math.Between(460, 600), y: 370 },
+            { x: Phaser.Math.Between(740, 850), y: 360 },
+
+            // Plataformas altas — pulos precisos exigidos
+            { x: Phaser.Math.Between(80,  190), y: 260 },
+            { x: Phaser.Math.Between(340, 440), y: 240 },
+            { x: Phaser.Math.Between(600, 700), y: 225 },
+            { x: Phaser.Math.Between(830, 910), y: 235 },
+        ];
+
+        const pt   = Phaser.Utils.Array.GetRandom(spawnPoints);
+        const coin = this.coins.create(pt.x, pt.y, 'coin');
+        coin.setScale(1.5);
+        coin.body.allowGravity = false;  // moeda flutua no ar
+        coin.play('anim_coin_spin');
+
+        // Efeito de pulsar suave — chama atenção para a posição da moeda
+        this.tweens.add({
+            targets: coin, scaleX: 1.8, scaleY: 1.8,
+            duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+        });
+
+        // Efeito de "pop" ao spawnar (sobe levemente)
+        this.tweens.add({
+            targets: coin, y: pt.y - 10,
+            duration: 350, yoyo: true, ease: 'Back.easeOut'
+        });
+    }
+
+    // ----------------------------------------------------------
+    //  _onCoinCollect — chamado quando o cavaleiro toca uma moeda.
+    //  Remove a moeda, atualiza o HUD e exibe partículas douradas.
+    // ----------------------------------------------------------
+    _onCoinCollect(cavaleira, coin) {
+        const cx = coin.x, cy = coin.y;
+        coin.destroy(); // remove a moeda do mundo imediatamente
+
+        // Atualiza pontuação (+10 bônus por moeda) e contagem
+        this.totalCoins++;
+        this.score += 10;
+        this.scoreText.setText('Score: ' + this.score);
+        this.coinText.setText('🪙 ' + this.totalCoins);
+
+        // ---- Efeito de partículas: 8 faíscas explodem radialmente ----
+        // Aqui acontece o loop que cria cada faísca em ângulo diferente
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2;
+            const dist  = Phaser.Math.Between(28, 55);
+            const spark = this.add.graphics().setDepth(15);
+            spark.fillStyle(i % 2 === 0 ? 0xffd700 : 0xffffa0, 1);
+            spark.fillCircle(0, 0, Phaser.Math.Between(2, 4));
+            spark.x = cx; spark.y = cy;
+
+            // Cada faísca viaja em direção diferente e desaparece gradualmente
+            this.tweens.add({
+                targets: spark,
+                x: cx + Math.cos(angle) * dist,
+                y: cy + Math.sin(angle) * dist,
+                alpha: 0, scaleX: 0.1, scaleY: 0.1,
+                duration: Phaser.Math.Between(280, 480),
+                ease: 'Power2',
+                onComplete: () => spark.destroy() // limpa da memória ao terminar
+            });
+        }
+
+        // Texto flutuante "+10" que sobe e some acima do ponto de coleta
+        const txt = this.add.text(cx, cy - 8, '+10', {
+            fontSize: '20px', fill: '#ffd700',
+            stroke: '#000', strokeThickness: 3,
+            fontFamily: 'Arial', fontStyle: 'bold'
+        }).setOrigin(0.5).setDepth(15);
+
+        this.tweens.add({
+            targets: txt, y: cy - 55, alpha: 0,
+            duration: 750, ease: 'Power2',
+            onComplete: () => txt.destroy()
+        });
+    }
+
+    // ----------------------------------------------------------
+    //  _onBirdHit — chamado quando o cavaleiro toca um pássaro.
+    //  Para tudo e exibe o game over.
+    // ----------------------------------------------------------
+    _onBirdHit(cavaleira, bird) {
+        if (this.isGameOver) return; // evita disparar game over duas vezes
+        this.isGameOver = true;
+
+        // Para de spawnar pássaros e moedas imediatamente
+        this.birdSpawnTimer.remove();
+        this.coinSpawnTimer.remove();
+
+        // Congela todos os pássaros que já estão na tela
+        this.birds.getChildren().forEach(b => b.setVelocityX(0));
+
+        this.knight.die();
+        this._showGameOver();
+    }
+
+    // ----------------------------------------------------------
+    //  _showGameOver — exibe overlay com score e moedas desta
+    //  run e agenda o reinício automático em 2.5 segundos
+    // ----------------------------------------------------------
+    _showGameOver() {
+        const W = 928, H = 793;
+
+        // Fundo escuro cobrindo toda a tela
+        this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.65).setDepth(20);
+
+        this.add.text(W/2, H/2 - 105, 'GAME OVER', {
+            fontSize: '72px', fill: '#ff2222', stroke: '#000', strokeThickness: 6,
+            fontFamily: 'Arial Black, Arial', fontStyle: 'bold'
+        }).setOrigin(0.5).setDepth(21);
+
+        // Score de sobrevivência
+        this.add.text(W/2, H/2 - 15, 'Score: ' + this.score, {
+            fontSize: '34px', fill: '#ffffff', stroke: '#000', strokeThickness: 4,
+            fontFamily: 'Arial'
+        }).setOrigin(0.5).setDepth(21);
+
+        // Moedas coletadas nessa run
+        this.add.text(W/2, H/2 + 35, '🪙 Moedas: ' + this.totalCoins, {
+            fontSize: '28px', fill: '#ffd700', stroke: '#000', strokeThickness: 3,
+            fontFamily: 'Arial'
+        }).setOrigin(0.5).setDepth(21);
+
+        this.add.text(W/2, H/2 + 88, 'Reiniciando...', {
+            fontSize: '24px', fill: '#aaaaaa', stroke: '#000', strokeThickness: 3,
+            fontFamily: 'Arial'
+        }).setOrigin(0.5).setDepth(21);
+
+        // Reinicia a cena inteira após 2.5s — reseta tudo e volta à tela de início
+        this.time.delayedCall(2500, () => this.scene.restart());
+    }
+
+    // ----------------------------------------------------------
+    //  UPDATE — loop principal chamado a cada frame.
+    //  Remove objetos que saíram da tela e atualiza o cavaleiro.
+    // ----------------------------------------------------------
+    update() {
+        // Remove pássaros que saíram pela esquerda — evita vazamento de memória
+        this.birds.getChildren().forEach(b => { if (b.x < -100) b.destroy(); });
+
+        // Repassa o tick de input e física para o cavaleiro
         this.knight.update();
     }
 }

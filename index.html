@@ -1,18 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <!-- 
-        Importa a biblioteca Phaser 3 direto de um CDN (servidor externo).
-        O Phaser é o "motor" do jogo, ele cuida de renderizar imagens na tela,
-        física, animações, input do teclado, etc.
-        Precisa vir ANTES dos seus scripts para estar disponível quando eles rodarem.
-    -->
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
-    
-    
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>The last knight</title>
+    <title>The Last Knight</title>
     <style>
         body {
             display: flex;
@@ -20,24 +12,12 @@
             align-items: center;
             height: 100vh;
             margin: 0;
+            background: #000;
         }
     </style>
 </head>
 <body>
-
-    <!--
-        A ORDEM DOS SCRIPTS IMPORTA MUITO!
-        
-        1. knight.js  → precisa ser carregado PRIMEIRO porque a classe Knight
-                         é usada dentro de background.js. Se background.js
-                         carregar antes, ele tentaria usar Knight antes de existir.
-        
-        2. background.js → usa a classe Knight, então Knight já deve existir.
-        
-        3. main.js → inicia o jogo usando as classes Background (e Knight).
-                     Precisa vir por último pois depende de tudo acima.
-    -->
-        
+    <!-- Ordem importa: Knight precisa existir antes de Background -->
     <script src="knight.js"></script>
     <script src="background.js"></script>
     <script src="main.js"></script>
