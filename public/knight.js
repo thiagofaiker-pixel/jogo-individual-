@@ -2,7 +2,7 @@
 //  knight.js
 //  Classe auxiliar que encapsula toda a lógica do cavaleiro:
 //  sprites, animações, input e física de movimento.
-//  Não é uma Phaser.Scene — vive como componente dentro
+//  Não é uma Phaser.Scene, vive como componente dentro
 //  da cena Background.
 // ============================================================
 
@@ -17,12 +17,10 @@ class Knight {
         this.isDead      = false;   // trava input após a morte
     }
 
-    // ----------------------------------------------------------
-    //  PRELOAD — registra todos os spritesheets no loader
-    //  do Phaser antes de qualquer frame ser renderizado
-    // ----------------------------------------------------------
+    // Dando load em todos os assets
     preload() {
-        const fw = 96, fh = 64;
+        const fw = 96, fh = 64; // definindo a largura e altura da personagem
+
         this.scene.load.spritesheet('attack1',       'assets/knight/Attack_KG_1.png',         { frameWidth: fw, frameHeight: fh });
         this.scene.load.spritesheet('attack2',       'assets/knight/Attack_KG_2.png',         { frameWidth: fw, frameHeight: fh });
         this.scene.load.spritesheet('attack3',       'assets/knight/Attack_KG_3.png',         { frameWidth: fw, frameHeight: fh });
@@ -61,10 +59,10 @@ class Knight {
         this.scene.load.spritesheet('wallside',      'assets/knight/Wallside_KG_1.png',       { frameWidth: fw, frameHeight: fh });
     }
 
-    // ----------------------------------------------------------
+    
     //  CREATE — instancia o sprite, registra animações e
     //  configura o input do teclado
-    // ----------------------------------------------------------
+    
     create() {
         this.isDead = false;
 
@@ -92,6 +90,7 @@ class Knight {
         this.scene.anims.create({ key: 'anim_grabIdle',   frames: this.scene.anims.generateFrameNumbers('grabIdle',   { start: 0, end: 2 }), frameRate: 6,  repeat: -1 });
 
         // ---------- Animações one-shot (tocam uma vez e voltam ao idle) ----------
+
         this.scene.anims.create({ key: 'anim_jump',       frames: this.scene.anims.generateFrameNumbers('jump',       { start: 0, end: 5 }), frameRate: 10, repeat: 0 });
         this.scene.anims.create({ key: 'anim_landing',    frames: this.scene.anims.generateFrameNumbers('landing1',   { start: 0, end: 2 }), frameRate: 12, repeat: 0 });
         this.scene.anims.create({ key: 'anim_landing2',   frames: this.scene.anims.generateFrameNumbers('landing2',   { start: 0, end: 2 }), frameRate: 12, repeat: 0 });
@@ -154,10 +153,10 @@ class Knight {
         this.cavaleira.play('anim_idle');
     }
 
-    // ----------------------------------------------------------
+    
     //  die — desativa input, paralisa o cavaleiro e toca
     //  a animação de morte. A cena reinicia após ela terminar.
-    // ----------------------------------------------------------
+    
     die() {
         if (this.isDead) return;
         this.isDead = true;
@@ -178,10 +177,10 @@ class Knight {
         }
     }
 
-    // ----------------------------------------------------------
+    
     //  UPDATE — chamado a cada frame. Processa input do jogador
-    //  e aplica movimento, pulo e transições de animação.
-    // ----------------------------------------------------------
+    //  e aplica movimento, pulo e transições de animação. Responsável pelo loop do jogo.
+    
     update() {
         if (this.isDead) return;
 
